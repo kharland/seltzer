@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 import 'package:seltzer/src/context.dart';
@@ -6,28 +7,36 @@ import 'package:seltzer/src/context.dart';
 /// A WebSocket Object.
 ///
 /// The socket must be opened before any data can be sent through it.  Clients
-/// should close the socket when they are finished listening to its [onData]
+/// should close the socket when they are finished listening to its [onMessage]
 /// stream.
 ///
 /// Example Usage:
-///     var socket = new SeltzerWebSocket();
-///     await socket.open('ws://foo.com:9090');
-///     socket.onData.listen(print);
+///     var socket = new SeltzerWebSocket('ws://foo.com:9090');
+///     socket.onMessage.listen(print);
 ///     await socket.sendString(stringData);
 ///     await socket.close();
 abstract class SeltzerWebSocket {
   /// Default constructor.
-  factory SeltzerWebSocket() => createWebSocket();
+  factory SeltzerWebSocket(String url) => createWebSocket(url);
 
   /// The stream of data received by this socket.
-  Stream<String> get onData;
+  Stream<SeltzerMessage> get onMessage;
 
-  /// Opens the socket and connects it to [url].
+  /// An event stream that fires when the socket is ready to read/write.
   ///
-  /// [url] must use the scheme ws or wss.
-  Future open(String url);
+  /// The default implementation only fires a single event.
+  Stream get onOpen;
 
-  /// Closes this socket's connection.
+  /// An event stream that fires when the socket is closed.
+  ///
+  /// The default implementation only fires a single event.
+  Stream get onClose;
+
+  /// Initiates closing this socket's connection.
+  ///
+  /// The returned future completes when all open close messages have been sent
+  /// and all subscriptions have cancelled.  To determine when the socket itself
+  /// truly closes, subscribe to this socket's [onClose] stream.
   ///
   /// Set the optional code and reason arguments to send close information to
   /// the remote peer.
@@ -35,6 +44,9 @@ abstract class SeltzerWebSocket {
 
   /// Sends [data] to the remote peer.
   Future sendString(String data);
+
+  /// Sends [data] to the remote peer.
+  Future sendBytes(ByteBuffer data);
 }
 
 /// An [SeltzerWebSocket] that delegates to an existing instance.
@@ -46,26 +58,23 @@ class SeltzerWebSocketTransformer implements SeltzerWebSocket {
   /// Default constructor.
   SeltzerWebSocketTransformer(this._delegate);
 
-  /// The stream of data received by this socket.
   @override
-  Stream<String> get onData => _delegate.onData;
+  Stream<SeltzerMessage> get onMessage => _delegate.onMessage;
 
-  /// Opens the socket and connects it to [url].
-  ///
-  /// [url] must use the scheme ws or wss.
   @override
-  Future open(String url) => _delegate.open(url);
+  Stream get onOpen => _delegate.onOpen;
 
-  /// Closes the websocket connection.
-  ///
-  /// Set the optional code and reason arguments to send close information to
-  /// the remote peer.
+  @override
+  Stream get onClose => _delegate.onClose;
+
   @override
   Future close([int code, String reason]) => _delegate.close(code, reason);
 
-  /// Sends [data] to the remote peer.
   @override
   Future sendString(String data) => _delegate.sendString(data);
+
+  @override
+  Future sendBytes(ByteBuffer data) => _delegate.sendBytes(data);
 }
 
 /// Elegant and rich cross-platform HTTP service.
@@ -101,11 +110,8 @@ abstract class PlatformSeltzerHttp implements SeltzerHttp {
   /// Executes with a standard input of arguments for an HTTP request.
   ///
   /// Returns a [Stream] of [SeltzerHttpResponse] objects.
-  Future<SeltzerHttpResponse> execute(
-    String method,
-    String url, {
-    Map<String, String> headers,
-  });
+  Future<SeltzerHttpResponse> execute(String method, String url,
+      {Map<String, String> headers});
 
   @override
   @mustCallSuper
@@ -130,11 +136,7 @@ abstract class PlatformSeltzerHttp implements SeltzerHttp {
   /// Handles all HTTP [method] requests to [url].
   @protected
   SeltzerHttpRequest request(String method, String url) =>
-      new PlatformSeltzerHttpRequest(
-        this,
-        method: method,
-        url: url,
-      );
+      new PlatformSeltzerHttpRequest(this, method: method, url: url);
 }
 
 /// An implementation of [SeltzerHttp] that delegates to an existing instance.
@@ -206,34 +208,22 @@ class PlatformSeltzerHttpRequest implements SeltzerHttpRequest {
   final String url;
 
   /// Initialize a new [PlatformSeltzerHttpRequest].
-  PlatformSeltzerHttpRequest(
-    this._executor, {
-    this.headers: const {},
-    @required this.method,
-    @required this.url,
-  });
+  PlatformSeltzerHttpRequest(this._executor,
+      {this.headers: const {}, @required this.method, @required this.url});
 
   @override
   Stream<SeltzerHttpResponse> send() {
-    return _executor
-        .execute(
-          method,
-          url,
-          headers: headers,
-        )
-        .asStream();
+    return _executor.execute(method, url, headers: headers).asStream();
   }
 
   @override
   PlatformSeltzerHttpRequest set(String header, String value) {
     var headers = new Map<String, String>.from(this.headers);
     headers[header] = value;
-    return new PlatformSeltzerHttpRequest(
-      _executor,
-      headers: new Map<String, String>.unmodifiable(headers),
-      method: method,
-      url: url,
-    );
+    return new PlatformSeltzerHttpRequest(_executor,
+        headers: new Map<String, String>.unmodifiable(headers),
+        method: method,
+        url: url);
   }
 }
 
@@ -241,4 +231,15 @@ class PlatformSeltzerHttpRequest implements SeltzerHttpRequest {
 abstract class SeltzerHttpResponse {
   /// Response payload.
   String get payload;
+}
+
+/// A message received by a [SeltzerWebSocket].
+abstract class SeltzerMessage {
+  /// Whether this message's payload contains binary data.
+  ///
+  /// If true, [payload] is a [ByteBuffer]. Otherwise payload is a [String].
+  bool get isBinary;
+
+  /// The data contained in this message.
+  Object get payload;
 }
