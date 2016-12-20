@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:seltzer/src/context.dart' as platform;
 
+import 'package:seltzer/src/socket_impl.dart';
+import 'package:stream_channel/stream_channel.dart';
 import 'socket_message.dart';
 
 /// Returns a connected [SeltzerWebSocket] to [url].
@@ -26,6 +28,8 @@ abstract class SeltzerWebSocket {
   static Future<SeltzerWebSocket> connect(String url) => platform.connect(url);
 
   /// The stream of data received by this socket.
+  ///
+  /// This is always a broadcast stream.
   Stream<SeltzerMessage> get onMessage;
 
   /// An future that completes when the socket is closed.
@@ -39,13 +43,13 @@ abstract class SeltzerWebSocket {
   ///
   /// Set the optional [code] and [reason] arguments to send close information
   /// to the remote peer.
-  Future<Null> close({int code, String reason});
+  void close({int code, String reason});
 
   /// Sends bytes [data] to the remote peer.
-  Future<Null> sendBytes(ByteBuffer data);
+  void sendBytes(ByteBuffer data);
 
   /// Sends string [data] to the remote peer.
-  Future<Null> sendString(String data);
+  void sendString(String data);
 }
 
 /// Returned from [SeltzerWebSocket.onClose].
